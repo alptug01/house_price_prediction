@@ -1,0 +1,993 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+---
+Read File and Inspecting the dataset
+---
+
+```{r}
+# Read Fİle
+#Chennai houseing sale.csv
+#C:/Users/furka/Desktop/Machine Learning Datasetmiz/Chennai houseing sale.csv
+dataset <<- read.csv("Chennai houseing sale.csv")
+
+#Show Dataset
+head(dataset, 10)
+
+#Lowercasing column headers.
+colnames(dataset) <- tolower(colnames(dataset))
+
+#Lowecase
+dataset[] <- lapply(dataset, function(x) {
+  if(is.character(x)) {
+    return(tolower(x))
+  } else {
+    return(x)
+  }
+})
+
+head(dataset, 10)
+```
+
+
+---
+PREPROCESSING AŞAMALARI 1: Filling null values in Dataset with Median
+---
+
+```{r}
+cat("Number of missing values : ", sum(is.na(dataset)) , "\n")
+
+# Determining columns with missing values
+columns_with_na <- names(Filter(function(x) any(is.na(x)), dataset))
+
+# Selecting numeric columns with missing values
+numeric_columns_with_na <- columns_with_na[sapply(dataset[columns_with_na], is.numeric)]
+
+cat("Columns with missing values : ", columns_with_na , "\n")
+
+# Fill Null value with median(numeric value)
+for (col in numeric_columns_with_na) {
+  dataset[[col]][is.na(dataset[[col]])] <- median(dataset[[col]], na.rm = TRUE)
+}
+
+cat("Number of missing values after filling : ", sum(is.na(dataset)), "\n")
+```
+
+
+---
+DATA CLEANING -> Correcting incorrectly entered values and identifying outliers.
+---
+
+
+```{r}
+library(dplyr)
+library(stringr)
+
+# Convert all column names to lowercase
+colnames(dataset) <- tolower(colnames(dataset))
+
+# Convert all values in the 'area' column to lowercase
+dataset$area <- tolower(dataset$area)
+
+# Correcting spelling mistakes in the 'area' column
+dataset$area <- str_replace_all(dataset$area, c('velchery' = 'velachery', 
+                                                 'kknagar' = 'kk nagar', 
+                                                 'tnagar' = 't nagar', 
+                                                 'chormpet' = 'chrompet', 
+                                                 'chrompt' = 'chrompet', 
+                                                 'chrmpet' = 'chrompet', 
+                                                 'ana nagar' = 'anna nagar', 
+                                                 'ann nagar' = 'anna nagar',
+                                                 'karapakam' = 'karapakkam', 
+                                                 'adyr' = 'adyar'))
+
+
+# Calculate IQR for Outlier
+q1 <- quantile(dataset$sales_price, 0.25)
+q3 <- quantile(dataset$sales_price, 0.75)
+iqr <- q3 - q1
+lower_bound <- q1 - 1.5 * iqr
+upper_bound <- q3 + 1.5 * iqr
+
+# Find outlier
+outliers_indices <- which(dataset$sales_price < lower_bound | dataset$sales_price > upper_bound)
+
+# Delete outlier row
+cleaned_data <- dataset[-outliers_indices, ]
+
+dataset <- cleaned_data
+
+dataset$sale_cond <- str_replace_all(dataset$sale_cond, c('adj land' = 'adjland', 
+                                                          'normal sale' = 'normal sale',
+                                                          'partiall' = 'partial',
+                                                          'ab normal' = 'abnormal'))
+
+
+dataset$park_facil <- str_replace_all(dataset$park_facil, c('noo' = 'no'))
+
+dataset$buildtype <- str_replace_all(dataset$buildtype, c('comercial' = 'commercial', 
+                                                          'others' = 'other'))
+
+
+dataset$utility_avail <- str_replace_all(dataset$utility_avail, c('all pub' = 'allpub',
+                                                                 'nosewr' = 'nosewa'))
+
+dataset$street <- str_replace_all(dataset$street, c('pavd' = 'paved', 
+                                                     'noaccess' = 'no access'))
+
+dataset$n_bedroom <- as.integer(dataset$n_bedroom)
+dataset$n_bathroom <- as.integer(dataset$n_bathroom)
+
+# Change format date_Sale and date_build
+dataset$date_sale <- as.Date(dataset$date_sale, format = "%d-%m-%Y")
+dataset$date_build <- as.Date(dataset$date_build, format = "%d-%m-%Y")
+
+# Create property age column
+dataset$property_age <- as.numeric(format(dataset$date_sale, "%Y")) - as.numeric(format(dataset$date_build, "%Y"))
+
+# Create total price column
+dataset$total_price <- dataset$reg_fee + dataset$commis + dataset$sales_price
+
+dataset <- dataset[, c('prt_id', 'area', 'sale_cond', 'park_facil',
+                        'buildtype', 'utility_avail', 'street', 'mzzone', 
+                        'date_build', 'date_sale', 'property_age', 
+                        'int_sqft', 'dist_mainroad', 'n_bedroom','n_bathroom', 'n_room', 
+                        'qs_rooms', 'qs_bathroom', 'qs_bedroom', 'qs_overall', 
+                        'reg_fee', 'commis', 'sales_price', 'total_price')]
+head(dataset, 10)
+```
+
+---
+Distribution Of Features in Data Columns
+---
+
+```{r}
+library(ggplot2)
+
+for (col in names(dataset)) {
+  if(is.numeric(dataset[[col]])) {
+    graph <- ggplot(dataset, aes(x = !!sym(col))) +
+      geom_histogram(fill = "lightblue", color = "grey", bins = 30) +
+      labs(title = paste("Distribution of", col))
+    print(graph)
+  } else {
+    graph <- ggplot(dataset, aes(x = !!sym(col))) +
+      geom_bar(fill = "blue", color = "grey") +
+      labs(title = paste("Distribution of", col))
+    print(graph)
+  }
+}
+```
+
+---
+Numeric Continious
+Plotting Features column vs Target column (Columnların target columna etkisini analiz etmek istiyoruz işimize yaramayan columnlar olabilir.)
+qs_overall and dist mainroad columns dont impact target column
+
+int_sqft column impact target column (high)
+property_age impact target column (low)
+---
+
+```{r}
+library(ggplot2)
+
+par(mfrow=c(2,2), mar=c(4,4,2,1), oma=c(2,2,2,2))
+
+plot(dataset$qs_overall, dataset$total_price, col = "grey", xlab = "qs_overall", ylab = "Total Price", main = "qs_overall vs Total Price")
+abline(lm(dataset$total_price ~ dataset$qs_overall), col = "blue")
+
+plot(dataset$int_sqft, dataset$total_price, col = "grey", xlab = "int_sqft", ylab = "Total Price", main = "int_sqft vs Total Price")
+abline(lm(dataset$total_price ~ dataset$int_sqft), col = "blue")
+
+plot(dataset$dist_mainroad, dataset$total_price, col = "grey", xlab = "dist_mainroad", ylab = "Total Price", main = "dist_mainroad vs Total Price")
+abline(lm(dataset$total_price ~ dataset$dist_mainroad), col = "blue")
+
+plot(dataset$property_age, dataset$total_price, col = "grey", xlab = "property_age", ylab = "Total Price", main = "property_age vs Total Price")
+abline(lm(dataset$total_price ~ dataset$property_age), col = "blue")
+
+mtext("Continous numerical variable VS Total price", side = 1, line = 5,adj = 1, cex = 1.5)
+```
+
+---
+Plotting Features column vs Target column
+DISCRETE Continous 
+
+n_room
+n_bedroom
+n_bathromm target columnu iyi şekilde etkiliyor
+
+These three columns impact the target column.
+
+qs_bathroom
+qs_room
+qs_bedroom
+These three columns do not impact the target column.
+---
+
+```{r}
+library(ggplot2)
+library(gridExtra)
+
+# Grafiği oluşturma
+p1 <- ggplot(dataset, aes(x = n_bedroom, y = total_price)) + 
+  geom_point(color = "blue") + 
+  geom_smooth(method = "lm", formula = y ~ x, color = "red") + 
+  labs(x = "n_bedroom", y = "Total Price") +
+  theme_minimal()
+
+p2 <- ggplot(dataset, aes(x = n_bathroom, y = total_price)) + 
+  geom_point(color = "grey") + 
+  geom_smooth(method = "lm", formula = y ~ x, color = "red") + 
+  labs(x = "n_bathroom", y = "Total Price") +
+  theme_minimal()
+
+p3 <- ggplot(dataset, aes(x = n_room, y = total_price)) + 
+  geom_point(color = "orange") + 
+  geom_smooth(method = "lm", formula = y ~ x, color = "red") + 
+  labs(x = "n_room", y = "Total Price") +
+  theme_minimal()
+
+p4 <- ggplot(dataset, aes(x = qs_rooms, y = total_price)) + 
+  geom_point(color = "purple") + 
+  geom_smooth(method = "lm", formula = y ~ x, color = "red") + 
+  labs(x = "qs_rooms", y = "Total Price") +
+  theme_minimal()
+
+p5 <- ggplot(dataset, aes(x = qs_bathroom, y = total_price)) + 
+  geom_point(color = "green") + 
+  geom_smooth(method = "lm", formula = y ~ x, color = "red") + 
+  labs(x = "qs_bathroom", y = "Total Price") +
+  theme_minimal()
+
+p6 <- ggplot(dataset, aes(x = qs_bedroom, y = total_price)) + 
+  geom_point() + 
+  geom_smooth(method = "lm", formula = y ~ x, color = "red") + 
+  labs(x = "qs_bedroom", y = "Total Price") +
+  theme_minimal()
+
+grid.arrange(p1, p2, p3, p4, p5, p6, nrow = 2, ncol = 3, top = "Descrete numerical variable VS Total price")
+```
+
+---
+Plotting Features column vs Target column 
+
+Analyzing the impact of columns on the target column 
+
+The following columns are related. (Reg Fee and Commis)
+---
+
+```{r}
+library(ggplot2)
+library(gridExtra)
+
+p1 <- ggplot(dataset, aes(x = reg_fee, y = total_price)) +
+  geom_point(color = 'green') +
+  geom_smooth(method = 'lm', formula = y ~ x, color = 'red') +
+  labs(title = 'Reg Fee vs Total Price')
+
+p2 <- ggplot(dataset, aes(x = commis, y = total_price)) +
+  geom_point(color = 'blue') +
+  geom_smooth(method = 'lm', formula = y ~ x, color = 'red') +
+  labs(title = 'Commis vs Total Price')
+
+grid.arrange(p1, p2, ncol = 2, top = "Commision & Registration fee VS Total price")
+```
+
+
+
+---
+OneHotEncoder buildtype
+---
+
+```{r}
+filtered_data <- dataset[dataset$buildtype %in% c("commercial", "other", "house"), ]
+
+# One-hot encoding
+one_hot_encoded <- model.matrix(~ buildtype - 1, data = filtered_data)
+
+#delete buildtype
+dataset <- dataset[ , !(names(dataset) %in% "buildtype")]
+
+dataset <- cbind(dataset, one_hot_encoded)
+
+head(dataset,10)
+```
+
+---
+One-Hot encoding area sütunu
+---
+
+```{r}
+area_levels <- c("karapakkam", "anna nagar", "adyar", "velachery", "chrompet", "kk nagar", "t nagar")
+one_hot_encoded_area <- matrix(0, nrow = nrow(dataset), ncol = length(area_levels))
+colnames(one_hot_encoded_area) <- paste("area", area_levels, sep = "_")
+
+for (i in 1:nrow(dataset)) {
+  area_index <- match(dataset[i, "area"], area_levels)
+  if (!is.na(area_index)) {
+    one_hot_encoded_area[i, area_index] <- 1
+  }
+}
+
+one_hot_encoded_area_df <- as.data.frame(one_hot_encoded_area)
+
+#delete are column and add one_hot_encoded_area columns
+dataset <- cbind(dataset[, !(names(dataset) %in% "area")], one_hot_encoded_area_df)
+
+head(dataset)
+```
+
+---
+One hot encoding sale_condition
+---
+
+```{r}
+
+dataset$sale_cond <- factor(dataset$sale_cond, levels = c('partial', 'family', 'abnormal', 'normal sale', 'adjland'))
+
+#One hot encoding
+one_hot_encoded_sale_cond <- model.matrix(~ sale_cond - 1, data = dataset)
+
+# Delete sade_cond
+dataset <- dataset[, !(names(dataset) %in% "sale_cond")]
+
+# Add One-hot encoded
+dataset <- cbind(dataset, one_hot_encoded_sale_cond)
+
+head(dataset)
+```
+
+---
+One hot encoding park_Facil
+---
+
+```{r}
+
+dataset$park_facil <- factor(dataset$park_facil, levels = c('yes', 'no'))
+
+# 'yes' 1 'no' 2
+dataset$park_facil <- ifelse(dataset$park_facil == 'yes', 1, 0)
+
+dataset$park_facil <- as.integer(dataset$park_facil)
+
+head(dataset)
+```
+
+
+---
+one hot encoding utility_avail
+---
+
+```{r}
+
+utility_levels <- c('elo', 'nosewa', 'nosewr', 'allpub')
+utility_factors <- factor(dataset$utility_avail, levels = utility_levels)
+
+one_hot_encoded_utility <- model.matrix(~ utility_avail - 1, data = dataset)
+
+one_hot_encoded_utility_df <- as.data.frame(one_hot_encoded_utility)
+
+#add one hot encoded columns
+dataset <- cbind(dataset, one_hot_encoded_utility_df)
+
+# Delete 'utility_avail'
+dataset <- dataset[, !(names(dataset) %in% "utility_avail")]
+
+head(dataset)
+```
+
+
+---
+one hot encoding street
+----
+
+
+```{r}
+
+street_levels <- c('no access', 'paved', 'gravel')  
+street_factors <- factor(dataset$street, levels = street_levels)
+
+one_hot_encoded_street <- model.matrix(~ street - 1, data = dataset)
+
+one_hot_encoded_street_df <- as.data.frame(one_hot_encoded_street)
+
+dataset <- cbind(dataset, one_hot_encoded_street_df)
+
+# Delete 'street'
+dataset <- dataset[, !(names(dataset) %in% "street")]
+
+head(dataset)
+```
+
+---
+one hot encoding mzzone
+---
+
+```{r}
+
+mzzone_levels <- c('a', 'c', 'i', 'rl', 'rh', 'rm') 
+mzzone_factors <- factor(dataset$mzzone, levels = mzzone_levels)
+
+one_hot_encoded_mzzone <- model.matrix(~ mzzone - 1, data = dataset)
+
+one_hot_encoded_mzzone_df <- as.data.frame(one_hot_encoded_mzzone)
+
+dataset <- cbind(dataset, one_hot_encoded_mzzone_df)
+
+# Delete 'mzzone'
+dataset <- dataset[, !(names(dataset) %in% "mzzone")]
+
+head(dataset)
+```
+
+
+---
+Delete Unused Columns and SCALING
+---
+
+```{r}
+dataset <- dataset[, !(names(dataset) %in% c("qs_overall", "dist_mainroad", "qs_rooms", "qs_bathroom", "qs_bedroom", "reg_fee", "commis", "prt_id", "date_build", "date_sale"))]
+
+# Min-Max normalization
+
+#min_max_normalize <- function(x) {
+#  return((x - min(x)) / (max(x) - min(x)))
+#}
+
+#normalized_dataset <- as.data.frame(lapply(dataset, min_max_normalize))
+
+#head(normalized_dataset)
+#dataset <- normalized_dataset
+
+
+input_columns <- c("park_facil", "property_age", "int_sqft", "n_bedroom", "n_bathroom", "n_room",
+                   "buildtypecommercial", "buildtypehouse", "buildtypeother", "area_karapakkam", "area_anna nagar",
+                   "area_adyar", "area_velachery", "area_chrompet", "area_kk nagar", "area_t nagar",
+                   "sale_condpartial", "sale_condfamily", "sale_condabnormal", "sale_condnormal sale",
+                   "sale_condadjland", "utility_availallpub", "utility_availelo", "utility_availnosewa",
+                   "utility_availnosewa ", "streetgravel", "streetno access", "streetpaved", "mzzonea", "mzzonec",
+                   "mzzonei", "mzzonerh", "mzzonerl", "mzzonerm")
+
+target_columns <- c("sales_price", "total_price")
+head(dataset)
+
+#Log Transform
+dataset$sales_price <- log(dataset$sales_price)
+dataset$total_price <- log(dataset$total_price)
+dataset$int_sqft <- log(dataset$int_sqft) 
+dataset$property_age <- log(dataset$property_age) 
+
+colnames(dataset)
+head(dataset)
+
+```
+
+
+---
+First Step : Linear regression
+---
+
+```{r}
+library(caret)
+library(Metrics)
+
+set.seed(42)
+trainIndex <- createDataPartition(dataset$total_price, p = 0.8, list = FALSE)
+train_data <- dataset[trainIndex, ]
+test_data <- dataset[-trainIndex, ]
+
+lm_model <- train(
+  x = train_data[, -which(names(train_data) %in% target_columns)],
+  y = train_data$sales_price + train_data$total_price,
+  method = "lm",
+  trControl = trainControl(method = "cv", number = 10),
+  metric = "RMSE"
+)
+
+predictions <- predict(lm_model, newdata = test_data[, -which(names(test_data) %in% target_columns)])
+
+errors <- predictions - (test_data$sales_price + test_data$total_price)
+
+r_squared <- cor(predictions, test_data$sales_price + test_data$total_price)^2
+mse <- mean(errors^2)
+rmse <- sqrt(mse)
+mae <- mean(abs(errors))
+
+
+plot(predictions, test_data$sales_price + test_data$total_price)
+abline(0, 1, col = "red")
+
+results <- data.frame(
+  `R2` = r_squared,
+  `MSE` = mse,
+  `RMSE` = rmse,
+  `MAE` = mae
+)
+
+print(results)
+```
+
+
+---
+Second Step : Lasso Regression
+We were getting a warning about null values, so I added this check line. In fact, there are no null values. That's why we ignored it and tested this model as well.
+---
+
+```{r}
+#We were getting a warning about null values, so I added this check line. In fact, there are no null values. That's why we ignored it and tested this model as well.
+#complete_cases <- complete.cases(data)
+#print(complete_cases)
+
+library(caret)
+library(glmnet)
+library(Metrics)
+
+set.seed(42)
+trainIndex <- createDataPartition(dataset$total_price, p = 0.8, list = FALSE)
+train_data <- dataset[trainIndex, ]
+test_data <- dataset[-trainIndex, ]
+
+alpha_values <- c(0, 1, 0.1)
+lambda_values <- c(0.1, 1, 0.1)
+
+results <- data.frame()
+
+for (alpha in alpha_values) {
+  for (lambda in lambda_values) {
+    lasso_model <- train(
+      x = train_data[, -which(names(train_data) %in% target_columns)],
+      y = train_data$sales_price + train_data$total_price,
+      method = "glmnet",
+      trControl = trainControl(method = "cv", number = 10),
+      metric = "RMSE",
+      tuneGrid = expand.grid(alpha = alpha, lambda = lambda)
+    )
+
+    predictions <- predict(lasso_model, newdata = test_data[, -which(names(test_data) %in% target_columns)])
+
+    errors <- predictions - (test_data$sales_price + test_data$total_price)
+
+    r_squared <- cor(predictions, test_data$sales_price + test_data$total_price)^2
+    mse <- mean(errors^2)
+    rmse <- sqrt(mse)
+    mae <- mean(abs(errors))
+
+    result <- data.frame(
+      Alpha = alpha,
+      Lambda = lambda,
+      R_Squared = r_squared,
+      MSE = mse,
+      RMSE = rmse,
+      MAE = mae
+    )
+    results <- rbind(results, result)
+  }
+}
+print(results)
+```
+
+
+
+
+
+---
+First Step : Random Forest Default Parameter
+---
+
+```{r}
+library(caret)
+library(randomForest)
+library(Metrics)
+
+#Create Train and test set.
+set.seed(42)
+trainIndex <- createDataPartition(dataset$total_price, p = 0.8, list = FALSE)
+train_data <- dataset[trainIndex, ]
+test_data <- dataset[-trainIndex, ]
+
+#Create Random Forest model
+rf_model <- randomForest(
+  x = train_data[, -which(names(train_data) %in% target_columns)],
+  y = train_data$sales_price + train_data$total_price
+)
+
+#Prediciton for random forest model
+predictions <- predict(rf_model, newdata = test_data[, -which(names(test_data) %in% target_columns)])
+
+# Calculate Error
+errors <- predictions - (test_data$sales_price + test_data$total_price)
+
+# Calculated Metrics
+r_squared <- cor(predictions, test_data$sales_price + test_data$total_price)^2
+mse <- mean(errors^2)
+rmse <- sqrt(mse)
+mae <- mean(abs(errors))
+
+plot(predictions, test_data$sales_price + test_data$total_price)
+abline(0, 1, col = "red")
+
+# Create Table
+results <- data.frame(
+  `R2` = r_squared,
+  `MSE` = mse,
+  `RMSE` = rmse,
+  `MAE` = mae
+)
+
+print(results)
+```
+
+
+---
+Second Step : Random Forest ntree and mtry parameter without kfold
+---
+
+```{r}
+library(caret)
+library(randomForest)
+library(Metrics)
+
+#Create Train and test set
+set.seed(42)
+trainIndex <- createDataPartition(dataset$total_price, p = 0.8, list = FALSE)
+train_data <- dataset[trainIndex, ]
+test_data <- dataset[-trainIndex, ]
+
+# Parameter Values
+ntree_values <- c(50, 100, 300, 500)
+mtry_values <- c(2, 5, 15 , 20)
+
+metrics <- data.frame()
+
+for (ntree in ntree_values) {
+  for (mtry in mtry_values) {
+    # Create Model
+    rf_model <- randomForest(
+      x = train_data[, -which(names(train_data) %in% target_columns)],
+      y = train_data$sales_price + train_data$total_price,
+      ntree = ntree,
+      mtry = mtry
+    )
+    
+    predictions <- predict(rf_model, newdata = test_data[, -which(names(test_data) %in% target_columns)])
+    
+    r_squared <- cor(predictions, test_data$sales_price + test_data$total_price)^2
+    mse <- mean((test_data$sales_price + test_data$total_price - predictions)^2)
+    rmse <- sqrt(mse)
+    mae <- mean(abs(test_data$sales_price + test_data$total_price - predictions))
+    
+    metrics <- rbind(metrics, data.frame(ntree = ntree, mtry = mtry, R_Squared = r_squared, MSE = mse, RMSE = rmse, MAE = mae))
+  }
+}
+
+print(metrics)
+
+```
+
+
+---
+Third step : random forest with ntree , mtry and k_fold values
+---
+
+```{r}
+library(caret)
+library(randomForest)
+library(Metrics)
+
+set.seed(42)
+trainIndex <- createDataPartition(dataset$total_price, p = 0.8, list = FALSE)
+train_data <- dataset[trainIndex, ]
+test_data <- dataset[-trainIndex, ]
+
+ntree_values <- c(50, 100, 300, 500)
+mtry_values <- c(2, 5, 15, 20)
+k_fold_values <- c(5, 10)
+
+metrics <- data.frame()
+
+for (ntree in ntree_values) {
+  for (mtry in mtry_values) {
+    for (k_fold in k_fold_values) {
+      rf_model <- randomForest(
+        x = train_data[, -which(names(train_data) %in% target_columns)],
+        y = train_data$sales_price + train_data$total_price,
+        ntree = ntree,
+        mtry = mtry
+      )
+      predictions <- predict(rf_model, newdata = test_data[, -which(names(test_data) %in% target_columns)])
+      
+      r_squared <- cor(predictions, test_data$sales_price + test_data$total_price)^2
+      mse <- mean((test_data$sales_price + test_data$total_price - predictions)^2)
+      rmse <- sqrt(mse)
+      mae <- mean(abs(test_data$sales_price + test_data$total_price - predictions))
+      
+      metrics <- rbind(metrics, data.frame(ntree = ntree, mtry = mtry, k_fold = k_fold, R_Squared = r_squared, MSE = mse, RMSE = rmse, MAE = mae))
+    }
+  }
+}
+
+print(metrics)
+
+```
+
+
+---
+Fourth Step : Random Forest with ntree, mtry, k_fold, maxnodes, maxdepth parameter
+---
+
+
+```{r}
+library(caret)
+library(randomForest)
+library(Metrics)
+
+set.seed(42)
+trainIndex <- createDataPartition(dataset$total_price, p = 0.8, list = FALSE)
+train_data <- dataset[trainIndex, ]
+test_data <- dataset[-trainIndex, ]
+
+ntree_values <- c(50, 100, 300, 500)
+mtry_values <- c(2, 5, 15, 20)
+k_fold_values <- c(5, 10)
+
+metrics <- data.frame()
+
+for (ntree in ntree_values) {
+  for (mtry in mtry_values) {
+    for (k_fold in k_fold_values) {
+      for (maxnodes in c(10, 20, 30)) {
+        for (maxdepth in c(5, 10, 15)) {
+          rf_model <- randomForest(
+            x = train_data[, -which(names(train_data) %in% target_columns)],
+            y = train_data$sales_price + train_data$total_price,
+            ntree = ntree,
+            mtry = mtry,
+            maxnodes = maxnodes,
+            maxdepth = maxdepth
+          )
+          
+          predictions <- predict(rf_model, newdata = test_data[, -which(names(test_data) %in% target_columns)])
+          
+          r_squared <- cor(predictions, test_data$sales_price + test_data$total_price)^2
+          mse <- mean((test_data$sales_price + test_data$total_price - predictions)^2)
+          rmse <- sqrt(mse)
+          mae <- mean(abs(test_data$sales_price + test_data$total_price - predictions))
+          
+          metrics <- rbind(metrics, data.frame(ntree = ntree, mtry = mtry, k_fold = k_fold, maxnodes = maxnodes, maxdepth = maxdepth, R_Squared = r_squared, MSE = mse, RMSE = rmse, MAE = mae))
+        }
+      }
+    }
+  }
+}
+
+print(metrics) 
+```
+
+
+
+--- 
+Step 1 : Support Vector Regressor  Default Parameter
+---
+
+```{r}
+library(caret)
+library(e1071) 
+library(Metrics)
+
+# Create Train and Test set
+set.seed(42)
+trainIndex <- createDataPartition(dataset$total_price, p = 0.8, list = FALSE)
+train_data <- dataset[trainIndex, ]
+test_data <- dataset[-trainIndex, ]
+
+#Create Model
+svm_model <- train(
+  x = train_data[, -which(names(train_data) %in% target_columns)],
+  y = train_data$sales_price + train_data$total_price,
+  method = "svmRadial",
+  trControl = trainControl(method = "cv", number = 10),
+  metric = "RMSE"
+)
+
+predictions <- predict(svm_model, newdata = test_data[, -which(names(test_data) %in% target_columns)])
+
+errors <- predictions - (test_data$sales_price + test_data$total_price)
+
+r_squared <- cor(predictions, test_data$sales_price + test_data$total_price)^2
+mse <- mean(errors^2)
+rmse <- sqrt(mse)
+mae <- mean(abs(errors))
+
+
+plot(predictions, test_data$sales_price + test_data$total_price)
+abline(0, 1, col = "red")
+
+results <- data.frame(
+  `R2` = r_squared,
+  `MSE` = mse,
+  `RMSE` = rmse,
+  `MAE` = mae
+)
+
+print(results)
+```
+
+---
+Step 2 : Support Vector Regresson with C and Sigma parameters
+---
+
+```{r}
+library(caret)
+library(e1071)
+library(Metrics)
+
+set.seed(42)
+trainIndex <- createDataPartition(dataset$total_price, p = 0.8, list = FALSE)
+train_data <- dataset[trainIndex, ]
+test_data <- dataset[-trainIndex, ]
+
+C_values <- c(0.1, 0.5 , 1, 10)
+sigma_values <- c(0.001, 0.01, 1, 10)
+
+metrics <- data.frame()
+
+for (C in C_values) {
+  for (sigma in sigma_values) {
+    svm_model <- train(
+      x = train_data[, -which(names(train_data) %in% target_columns)],
+      y = train_data$sales_price + train_data$total_price,
+      method = "svmRadial",
+      trControl = trainControl(method = "cv", number = 10),
+      metric = "RMSE",
+      tuneGrid = data.frame(C = C, sigma = sigma)
+    )
+    predictions <- predict(svm_model, newdata = test_data[, -which(names(test_data) %in% target_columns)])
+  
+    r_squared <- cor(predictions, test_data$sales_price + test_data$total_price)^2
+    mse <- mean((test_data$sales_price + test_data$total_price - predictions)^2)
+    rmse <- sqrt(mse)
+    mae <- mean(abs(test_data$sales_price + test_data$total_price - predictions))
+  
+    metrics <- rbind(metrics, data.frame(C = C, Sigma = sigma, R_Squared = r_squared, MSE = mse, RMSE = rmse, MAE = mae))
+  }
+}
+print(metrics)
+```
+
+---
+Step 1 : KNN Default Parameters
+---
+
+```{r}
+library(caret)
+library(Metrics)
+
+set.seed(42)
+trainIndex <- createDataPartition(dataset$total_price, p = 0.8, list = FALSE)
+train_data <- dataset[trainIndex, ]
+test_data <- dataset[-trainIndex, ]
+
+knn_model <- train(
+  x = train_data[, -which(names(train_data) %in% target_columns)],
+  y = train_data$sales_price + train_data$total_price,
+  method = "knn",
+  trControl = trainControl(method = "cv", number = 10),
+  metric = "RMSE",
+)
+
+predictions <- predict(knn_model, newdata = test_data[, -which(names(test_data) %in% target_columns)])
+
+errors <- predictions - (test_data$sales_price + test_data$total_price)
+
+r_squared <- cor(predictions, test_data$sales_price + test_data$total_price)^2
+mse <- mean(errors^2)
+rmse <- sqrt(mse)
+mae <- mean(abs(errors))
+
+print(paste("R-kare Skoru:", r_squared))
+print(paste("MSE:", mse))
+print(paste("RMSE:", rmse))
+print(paste("MAE:", mae))
+
+plot(predictions, test_data$sales_price + test_data$total_price)
+abline(0, 1, col = "red")
+
+results <- data.frame(
+  `R2` = r_squared,
+  `MSE` = mse,
+  `RMSE` = rmse,
+  `MAE` = mae
+)
+
+print(results)
+```
+
+---
+Step 2 : KNN with k_values and k_fold parameters
+---
+
+```{r}
+library(caret)
+library(Metrics)
+
+set.seed(42)
+trainIndex <- createDataPartition(dataset$total_price, p = 0.8, list = FALSE)
+train_data <- dataset[trainIndex, ]
+test_data <- dataset[-trainIndex, ]
+
+k_values <- c(3, 5, 7 ,9, 11,13)
+k_fold_values <- c(5, 7, 10, 15)
+
+metrics <- data.frame()
+
+for (k in k_values) {
+  for (k_fold in k_fold_values) {
+    knn_model <- train(
+      x = train_data[, -which(names(train_data) %in% target_columns)],
+      y = train_data$sales_price + train_data$total_price,
+      method = "knn",
+      trControl = trainControl(method = "cv", number = k_fold),
+      metric = "RMSE",
+      tuneGrid = data.frame(k = k),
+    )
+    predictions <- predict(knn_model, newdata = test_data[, -which(names(test_data) %in% target_columns)])
+  
+    r_squared <- cor(predictions, test_data$sales_price + test_data$total_price)^2
+    mse <- mean((test_data$sales_price + test_data$total_price - predictions)^2)
+    rmse <- sqrt(mse)
+    mae <- mean(abs(test_data$sales_price + test_data$total_price - predictions))
+  
+    metrics <- rbind(metrics, data.frame(k = k, k_fold = k_fold, R_Squared = r_squared, MSE = mse, RMSE = rmse, MAE = mae))
+  }
+}
+print(metrics)
+```
+
+---
+STEP 3 : KNN CROSS VALIDATION YÖNTEMİNİ DEĞİŞTİRME
+---
+
+```{r}
+library(caret)
+library(Metrics)
+
+set.seed(42)
+trainIndex <- createDataPartition(dataset$total_price, p = 0.8, list = FALSE)
+train_data <- dataset[trainIndex, ]
+test_data <- dataset[-trainIndex, ]
+
+k_values <- c(3, 5, 7, 9,11,13)
+k_fold_values <- c(5, 7, 10, 15)
+
+metrics <- data.frame()
+
+for (k in k_values) {
+  for (k_fold in k_fold_values){
+      knn_model <- train(
+        x = train_data[, -which(names(train_data) %in% target_columns)],
+        y = train_data$sales_price + train_data$total_price,
+        method = "knn",
+        trControl = trainControl(method = "repeatedcv", number = k, repeats = k_fold),
+        metric = "RMSE",
+        tuneGrid = data.frame(k = k)
+      )
+    
+      predictions <- predict(knn_model, newdata = test_data[, -which(names(test_data) %in% target_columns)])
+    
+      r_squared <- cor(predictions, test_data$sales_price + test_data$total_price)^2
+      mse <- mean((test_data$sales_price + test_data$total_price - predictions)^2)
+      rmse <- sqrt(mse)
+      mae <- mean(abs(test_data$sales_price + test_data$total_price - predictions))
+    
+      metrics <- rbind(metrics, data.frame(k = k, R_Squared = r_squared, MSE = mse, RMSE = rmse, MAE = mae))
+  }
+}
+print(metrics)
+```
+
+
+
+
+
